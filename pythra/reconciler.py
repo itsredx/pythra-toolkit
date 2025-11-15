@@ -63,7 +63,7 @@ import html
 import json
 from typing import Any, Dict, List, Optional, Tuple, Union, Callable, Literal
 from dataclasses import dataclass, field
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 # near top imports if not already present
 # from collections import defaultdict
 
@@ -79,6 +79,19 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .base import Widget, Key
     from .drawing import PathCommandWidget
+
+# Import Cython implementations with graceful fallback
+try:
+    from .reconciler_loader import get_diff_props_impl, get_diff_node_impl, get_diff_children_impl, CYTHON_AVAILABLE
+except ImportError:
+    # If loader isn't available, provide stubs that return None (Python fallback)
+    CYTHON_AVAILABLE = False
+    def get_diff_props_impl():
+        return None
+    def get_diff_node_impl():
+        return None
+    def get_diff_children_impl():
+        return None
 
 
 # --- Key Class, IDGenerator, Data Structures (Unchanged) ---
@@ -150,7 +163,20 @@ class Reconciler:
         self._external_js_init_queue: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
         self._registered_js_initializers: Dict[str, Dict[str, Dict[str, Any]]] = defaultdict(dict)
 
-        print("🪄  PyThra Framework | Reconciler Initialized")
+        # Small in-memory LRU cache for HTML stub templates.
+        # Keys are (widget_class_name, stable_props_json) -> template string with '{id}' placeholder
+        self._html_stub_cache: "OrderedDict[tuple, str]" = OrderedDict()
+        self._html_stub_cache_max = 2048
+
+        # Cache Cython function implementations if available, else None for Python fallback
+        self._cython_diff_props_impl = get_diff_props_impl()
+        self._cython_diff_node_impl = get_diff_node_impl()
+        self._cython_diff_children_impl = get_diff_children_impl()
+
+        if CYTHON_AVAILABLE:
+            print("🪄  PyThra Framework | Reconciler Initialized (Cython accelerated)")
+        else:
+            print("🪄  PyThra Framework | Reconciler Initialized (Python fallback)")
         debug_print("🪄  PyThra Framework | Reconciler Initialized")
 
     def get_map_for_context(self, context_key: str) -> Dict[Union[Key, str], NodeData]:
@@ -634,8 +660,45 @@ class Reconciler:
 
         inline_styles = {}
 
+        # Check for a widget-provided custom generator first
         if hasattr(type(widget), "_generate_html_stub"):
             return type(widget)._generate_html_stub(widget, html_id, props)
+
+        # Attempt to use memoized template for common, cacheable props
+        try:
+            def _is_cacheable_value(v):
+                # Reject callables, Widget instances, and weakrefs
+                if callable(v):
+                    return False
+                if isinstance(v, Widget):
+                    return False
+                if isinstance(v, (list, tuple)):
+                    return all(_is_cacheable_value(i) for i in v)
+                if isinstance(v, dict):
+                    return all(isinstance(k, (str, int)) and _is_cacheable_value(val) for k, val in v.items())
+                return isinstance(v, (str, int, float, bool, type(None)))
+
+            cacheable = True
+            for k, v in props.items():
+                if not _is_cacheable_value(v):
+                    cacheable = False
+                    break
+
+            if cacheable:
+                # Build a stable JSON key from props
+                try:
+                    stable_props_json = json.dumps(props, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+                    cache_key = (type(widget).__name__, stable_props_json)
+                    if cache_key in self._html_stub_cache:
+                        template = self._html_stub_cache[cache_key]
+                        # Move to end (most-recently-used)
+                        self._html_stub_cache.move_to_end(cache_key)
+                        return template.format(id=html_id)
+                except Exception:
+                    # If serialization fails, fall back to non-cached path
+                    cacheable = False
+        except Exception:
+            cacheable = False
 
         # --- MODIFICATION TO HANDLE GENERIC ATTRIBUTES ---
         attrs = ""
@@ -778,8 +841,23 @@ class Reconciler:
         #     return type(widget)._generate_html_stub(widget, html_id, props)
 
         if tag in ["img", "hr", "br"]:
-            return f'<{tag} id="{html_id}" class="{classes}"{attrs}>'
-        return f'<{tag} id="{html_id}" class="{classes}"{attrs}>{inner_html}</{tag}>'
+            result = f'<{tag} id="{html_id}" class="{classes}"{attrs}>'
+        else:
+            result = f'<{tag} id="{html_id}" class="{classes}"{attrs}>{inner_html}</{tag}>'
+
+        # If cacheable, store a template (replace current html_id with placeholder)
+        try:
+            if cacheable:
+                template = result.replace(html_id, "{id}")
+                # Insert into LRU cache
+                self._html_stub_cache[cache_key] = template
+                self._html_stub_cache.move_to_end(cache_key)
+                if len(self._html_stub_cache) > self._html_stub_cache_max:
+                    self._html_stub_cache.popitem(last=False)
+        except Exception:
+            pass
+
+        return result
 
     # def _diff_props(self, old_props: Dict, new_props: Dict) -> Optional[Dict]:
     #     changes = {}
@@ -791,6 +869,11 @@ class Reconciler:
     #     return changes if changes else None
 
     def _diff_props(self, old_props: Dict, new_props: Dict) -> Optional[Dict]:
+        # Try to use Cython implementation if available
+        if self._cython_diff_props_impl is not None:
+            return self._cython_diff_props_impl(old_props, new_props)
+        
+        # Fall back to Python implementation
         changes = {}
         # --- THIS IS THE FIX ---
         # Define a set of properties to ignore during the diffing process.

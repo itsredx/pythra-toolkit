@@ -979,22 +979,40 @@ class Framework:
         Recursively removes non-serializable values from a data structure
         before it's passed to json.dumps.
         """
-        if isinstance(data, dict):
-            # Create a new dict, excluding keys with function values or widget instances
-            return {
-                k: self._sanitize_for_json(v)
-                for k, v in data.items()
-                if not callable(v) and not isinstance(v, Widget)
-            }
-        elif isinstance(data, list):
-            return [self._sanitize_for_json(item) for item in data]
-        # Allow basic types that are JSON-serializable
-        elif isinstance(data, (str, int, float, bool, type(None))):
+        # Fast-path for simple serializable types
+        if data is None or isinstance(data, (str, int, float, bool)):
             return data
-        else:
-            # For any other complex object, return its string representation
-            # This is a safe fallback.
+
+        # Handle lists/tuples with an iterative loop (avoid building unnecessary temporaries)
+        if isinstance(data, (list, tuple)):
+            out_list = []
+            for item in data:
+                if callable(item) or isinstance(item, Widget) or isinstance(item, weakref.ReferenceType):
+                    out_list.append(f"<{type(item).__name__}>")
+                else:
+                    out_list.append(self._sanitize_for_json(item))
+            return out_list
+
+        # Handle dicts (most common complex case)
+        if isinstance(data, dict):
+            out = {}
+            for k, v in data.items():
+                # Skip or summarize callables, widget instances, and weakrefs quickly
+                if callable(v) or isinstance(v, Widget) or isinstance(v, weakref.ReferenceType):
+                    out[k] = f"<{type(v).__name__}>"
+                else:
+                    out[k] = self._sanitize_for_json(v)
+            return out
+
+        # Weakrefs, callables, and widget instances get summarized
+        if callable(data) or isinstance(data, Widget) or isinstance(data, weakref.ReferenceType):
+            return f"<{type(data).__name__}>"
+
+        # Fallback: try to get a string representation
+        try:
             return str(data)
+        except Exception:
+            return "<non-serializable>"
 
     def _generate_dom_patch_script(self, patches: List[Patch], js_initializers=None) -> str:
         """Converts the list of Patch objects from the reconciler into executable JavaScript."""
@@ -1008,9 +1026,15 @@ class Framework:
             action, target_id, data = patch.action, patch.html_id, patch.data
 
             # --- THIS IS THE FIX ---
-            # Create a sanitized version of the data for logging.
-            sanitized_data_for_log = self._sanitize_for_json(data)
-            loggable_data_str = _dumps(sanitized_data_for_log)
+            # Create a sanitized version of the data for logging. Avoid doing
+            # expensive sanitization unless debug logging is enabled.
+            if getattr(self, 'config', None) and self.config.get('Debug'):
+                sanitized_data_for_log = self._sanitize_for_json(data)
+                loggable_data_str = _dumps(sanitized_data_for_log)
+            else:
+                # In non-debug mode, avoid the costly traversal and emit null
+                # to keep JS error logs small and fast.
+                loggable_data_str = 'null'
             # --- END OF FIX ---
 
             command_js = ""
