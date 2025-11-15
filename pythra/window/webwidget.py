@@ -98,6 +98,7 @@ import wmi
 # These classes define the data structures for touch and gesture events
 # that get passed between the JavaScript frontend and Python backend
 from ..events import TapDetails, PanUpdateDetails
+from ..debug_utils import debug_print
 
 QApplication.setAttribute(Qt.AA_EnableHighDpiScaling)
 QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps)
@@ -118,7 +119,7 @@ class FilteredOutput:
     
     📚 HOW IT WORKS:
         1. Wraps around the normal output streams (stdout/stderr)
-        2. Intercepts every message before it gets printed
+        2. Intercepts every message before it gets #printed
         3. Checks if the message contains unwanted keywords
         4. Either suppresses the message or lets it through
     
@@ -143,11 +144,11 @@ class FilteredOutput:
         """
         📝 The main filtering logic - decides whether to show or hide a message.
         
-        This method gets called every time something tries to print to the console.
+        This method gets called every time something tries to #print to the console.
         We check the message content and either suppress it or pass it through.
         
         Args:
-            message (str): The text that something is trying to print
+            message (str): The text that something is trying to #print
         """
         # 🔍 Check if the message contains any unwanted keywords
         # We convert to lowercase to catch variations in capitalization
@@ -164,7 +165,7 @@ class FilteredOutput:
         
         # If the message contains any unwanted keywords, suppress it
         if any(keyword in message.lower() for keyword in unwanted_keywords):
-            return  # 🚫 SUPPRESS: Don't print this message
+            return  # 🚫 SUPPRESS: Don't #print this message
         
         # ✅ ALLOW: Message is clean, pass it to the original stream
         self.original_stream.write(message)
@@ -231,17 +232,17 @@ def custom_message_handler(msg_type, context, message):
     ]
     
     if any(keyword in message.lower() for keyword in unwanted_keywords):
-        return  # 🚫 SUPPRESS: Don't print this Qt message
+        return  # 🚫 SUPPRESS: Don't #print this Qt message
     
     # ✅ ALLOW: Format and display the message based on its severity level
     if msg_type == QtMsgType.QtDebugMsg:
-        print(f"🐛 Debug: {message}")        # Debug info (usually for developers)
+        debug_print(f"🐛 Debug: {message}")        # Debug info (usually for developers)
     elif msg_type == QtMsgType.QtWarningMsg:
-        print(f"⚠️  Warning: {message}")       # Warning messages
+        debug_print(f"⚠️  Warning: {message}")       # Warning messages
     elif msg_type == QtMsgType.QtCriticalMsg:
-        print(f"🔴 Critical: {message}")     # Critical errors
+        debug_print(f"🔴 Critical: {message}")     # Critical errors
     elif msg_type == QtMsgType.QtFatalMsg:
-        print(f"☠️  Fatal: {message}")         # Fatal errors (app will likely crash)
+        debug_print(f"☠️  Fatal: {message}")         # Fatal errors (app will likely crash)
 
 # =============================================================================
 # APPLICATION INITIALIZATION AND FILTERING SETUP
@@ -270,12 +271,12 @@ qInstallMessageHandler(custom_message_handler)
 # This catches any messages that bypass Qt's logging system
 
 # 📝 WHY WE NEED BOTH LAYERS:
-# - Qt messages might use Qt's logging system OR Python's print/stdout
+# - Qt messages might use Qt's logging system OR Python's #print/stdout
 # - JavaScript console messages from WebEngine go through different channels
 # - By filtering both layers, we ensure comprehensive message suppression
 
 # Install the output stream filters
-sys.stdout = FilteredOutput(sys.stdout)  # Filter normal print() statements
+sys.stdout = FilteredOutput(sys.stdout)  # Filter normal #print() statements
 sys.stderr = FilteredOutput(sys.stderr)  # Filter error messages and warnings
 
 
@@ -347,11 +348,12 @@ class Api(QObject):
 
     def register_callback(self, name, callback):
         self.callbacks[name] = callback
-        # print("Callbacks: ", self.callbacks)
+        #print("Callbacks: ", self.callbacks)
 
     def clear_callbacks(self):
         """Removes all registered callbacks."""
-        print("API: Clearing all callbacks.")
+        #print("API: Clearing all callbacks.")
+        debug_print("API: Clearing all callbacks.")
         self.callbacks.clear()
 
     @Slot(str, int, result=str)
@@ -369,7 +371,7 @@ class Api(QObject):
     @Slot(str, result=str)
     def on_pressed_str(self, callback_name):
         if callback_name in self.callbacks:
-            # print("callbacks: ", self.callbacks)
+            # #print("callbacks: ", self.callbacks)
             self.callbacks[callback_name]()
 
             return f"Callback '{callback_name}' executed successfully."
@@ -388,9 +390,11 @@ class Api(QObject):
                 # The callback will be the state method (e.g., self.on_username_changed)
                 callback(value)
             except Exception as e:
-                print(f"Error executing input callback '{callback_name}': {e}")
+                #print(f"Error executing input callback '{callback_name}': {e}")
+                debug_print(f"Error executing input callback '{callback_name}': {e}")
         else:
-            print(f"Warning: Input callback '{callback_name}' not found.")
+            #print(f"Warning: Input callback '{callback_name}' not found.")
+            debug_print(f"Warning: Input callback '{callback_name}' not found.")
 
      # --- ADD THIS NEW SLOT FOR THE SLIDER ---
     @Slot(str, float, bool, result=None)
@@ -400,24 +404,29 @@ class Api(QObject):
         Executes the registered callback with the new float value.
         """
         callback = self.callbacks.get(callback_name)
-        print("callback drag_ended: ", drag_ended)
+        #print("callback drag_ended: ", drag_ended)
+        debug_print("callback drag_ended: ", drag_ended)
         if callback:
             try:
                 callback(value, drag_ended)
             except Exception as e:
-                print(f"Error executing slider callback '{callback_name}': {e}")
+                #print(f"Error executing slider callback '{callback_name}': {e}")
+                debug_print(f"Error executing slider callback '{callback_name}': {e}")
         else:
-            print(f"Warning: Slider callback '{callback_name}' not found.")
+            #print(f"Warning: Slider callback '{callback_name}' not found.")
+            debug_print(f"Warning: Slider callback '{callback_name}' not found.")
     # --- END OF NEW SLOT ---
 
     @Slot(str, int)
     def send_message(self, message, *args):
-        print(f"Frontend message: {message}, ", *args)
+        #print(f"Frontend message: {message}, ", *args)
+        debug_print(f"Frontend message: {message}, ", *args)
         return "Message received!"
 
     @Slot(str)
     def on_button_clicked(self, message):
-        print(f"Message from JavaScript: {message}")
+        #print(f"Message from JavaScript: {message}")
+        debug_print(f"Message from JavaScript: {message}")
 
     # --- THIS IS THE NEW SLOT ---
     # It's specifically for building virtual list items.
@@ -434,10 +443,12 @@ class Api(QObject):
                 # This call now returns a dict: {"html": "...", "css": "..."}
                 return callback(index)
             except Exception as e:
-                print(f"Error executing item builder '{builder_name}' for index {index}: {e}")
+                #print(f"Error executing item builder '{builder_name}' for index {index}: {e}")
+                debug_print(f"Error executing item builder '{builder_name}' for index {index}: {e}")
                 return {"html": "<div>Error</div>", "css": ""}
         else:
-            print(f"Warning: Item builder '{builder_name}' not found.")
+            #print(f"Warning: Item builder '{builder_name}' not found.")
+            debug_print(f"Warning: Item builder '{builder_name}' not found.")
             return {"html": "<div>Builder not found</div>", "css": ""}
 
     # --- ADD THIS NEW GENERIC SLOT ---
@@ -447,7 +458,8 @@ class Api(QObject):
         Generic slot to handle all events from the GestureDetector JS engine.
         """
         callback = self.callbacks.get(callback_name)
-        print("Callback tap debug info: ",callback, " " ,details)
+        #print("Callback tap debug info: ",callback, " " ,details)
+        debug_print("Callback tap debug info: ",callback, " " ,details)
         if callback:
             try:
                 # Based on the callback name, we can construct the correct data class.
@@ -460,9 +472,11 @@ class Api(QObject):
                     # For DoubleTap, LongPress, PanStart, PanEnd, no details are needed.
                     callback()
             except Exception as e:
-                print(f"Error executing gesture callback '{callback_name}': {e}")
+                #print(f"Error executing gesture callback '{callback_name}': {e}")
+                debug_print(f"Error executing gesture callback '{callback_name}': {e}")
         else:
-            print(f"Warning: Gesture callback '{callback_name}' not found.")
+            #print(f"Warning: Gesture callback '{callback_name}' not found.")
+            debug_print(f"Warning: Gesture callback '{callback_name}' not found.")
 
 
 # Create a global instance of the WindowManager
@@ -546,13 +560,16 @@ class WebWindow(QWidget):
 
         if html_file:
             self.webview.setUrl(QUrl.fromLocalFile(html_file))
-            # print(js_api.callbacks)
-            print("⚡ HTML loaded:")
+            # #print(js_api.callbacks)
+            #print("⚡ HTML loaded:")
+            debug_print("⚡ HTML loaded:")
         else:
-            print("HTML not loaded: ", html_file)
+            #print("HTML not loaded: ", html_file)
+            debug_print("HTML not loaded: ", html_file)
 
         self.layout.addWidget(self.webview)  # Webview occupies the entire space
-        print("⚡ WEBVIEW loaded:")
+        #print("⚡ WEBVIEW loaded:")
+        debug_print("⚡ WEBVIEW loaded:")
 
         # Setup QWebChannel
         self.channel = QWebChannel()
@@ -604,13 +621,14 @@ class WebWindow(QWidget):
 
     def close_window(self):
         self.close()
-        self.debug_window.close() if self.debug_window else print("closed")
+        # self.debug_window.close() if self.debug_window else print("closed")
+        self.debug_window.close() if self.debug_window else debug_print("closed")
 
     def evaluate_js(self, window_id, *scripts):
         # Define a dummy callback function to make the call non-blocking.
         def dummy_callback(result):
             # We can log the result here for debugging if needed.
-            # print(f"JS execution finished with result: {result}")
+            # #print(f"JS execution finished with result: {result}")
             pass
         if window_id in window_manager.windows:
             window = window_manager.windows[window_id]
@@ -618,9 +636,11 @@ class WebWindow(QWidget):
                 for script in scripts:
                     window.webview.page().runJavaScript(script, dummy_callback)
             else:
-                print(f"Window {window_id} does not have a webview.")
+                #print(f"Window {window_id} does not have a webview.")
+                debug_print(f"Window {window_id} does not have a webview.")
         else:
-            print(f"Window ID {window_id} not found.")
+            #print(f"Window ID {window_id} not found.")
+            debug_print(f"Window ID {window_id} not found.")
 
     def toggle_overlay(self):
         self.overlay_box.setVisible(not self.overlay_box.isVisible())
@@ -629,13 +649,15 @@ class WebWindow(QWidget):
     def _on_system_resume_slot(self):
         """Runs on the GUI thread when system resumes."""
         try:
-            print("GUI: handling system resume — syncing webview viewport now.")
+            #print("GUI: handling system resume — syncing webview viewport now.")
+            debug_print("GUI: handling system resume — syncing webview viewport now.")
             # call the sync helper which sets viewport and fires JS resize
             self._sync_webview_viewport()
             # optional: force a small delayed re-sync in case DPI changes arrive slightly later
             QTimer.singleShot(200, self._sync_webview_viewport)
         except Exception as e:
-            print("Error in _on_system_resume_slot:", e)
+            #print("Error in _on_system_resume_slot:", e)
+            debug_print("Error in _on_system_resume_slot:", e)
 
 
     def resizeEvent(self, event):
@@ -681,7 +703,8 @@ class WebWindow(QWidget):
             # force repaint
             self.webview.update()
         except Exception as e:
-            print("Warning: failed to sync webview viewport:", e)
+            #print("Warning: failed to sync webview viewport:", e)
+            debug_print("Warning: failed to sync webview viewport:", e)
 
 
 # Create Window Function
@@ -739,7 +762,7 @@ if __name__ == '__main__':
     # Create API instance and register callbacks
     api = Api()
     api.register_callback("bg", change_color)
-    api.register_callback("testCallback", lambda: print("Button clicked!"))
+    api.register_callback("testCallback", lambda: #print("Button clicked!"))
     window = create_window("Test Window", window_id="main_window", html_file="/home/red-x/Engine/ind.html", js_api=api, frameless=False)
     start(debug=True)
 

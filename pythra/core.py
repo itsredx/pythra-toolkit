@@ -37,6 +37,7 @@ from .widgets import *  # Import all widgets for class lookups if needed
 from .package_manager import PackageManager
 from .package_system import PackageType
 from .styles import *
+from .debug_utils import debug_print, init_debug_from_config
 
 
 # Type Hinting for circular dependencies
@@ -95,7 +96,7 @@ class Framework:
             # Otherwise, project root is where your main.py lives
             self.project_root = Path(main_script_path).parent
 
-        print(f"🎯 PyThra Framework | Project Root detected at: {self.project_root}")
+        debug_print(f"🎯 PyThra Framework | Project Root detected at: {self.project_root}")
 
         # STEP 2: Load your project configuration
         # This reads settings from your config.yaml file
@@ -128,7 +129,7 @@ class Framework:
         
         # STEP 4a: Auto-discover packages and plugins
         # This scans your project for any plugins you've added
-        print("🔍 PyThra Framework | Scanning for packages and plugins...")
+        debug_print("🔍 PyThra Framework | Scanning for packages and plugins...")
         discovered_packages = self.package_manager.discover_all_packages()
         
         # Automatically load any plugins found in your plugins/ directory
@@ -182,6 +183,12 @@ class Framework:
 
         self._loaded_js_engines: Set[str] = set() # Tracks JS engines already sent to the browser
 
+        # Small in-memory caches to avoid repeated filesystem hits
+        # Maps frozenset(required_engines) -> combined JS string
+        self._js_utils_cache: Dict[frozenset, str] = {}
+        # Cache for file contents to avoid reopening the same file repeatedly
+        self._js_file_content_cache: Dict[str, str] = {}
+
         self._result = None  # Stores UI update results
 
         # STEP 7: Start the asset server and finalize setup
@@ -192,7 +199,7 @@ class Framework:
         StatefulWidget.set_framework(self)
         self._last_update_time = time.time()
         
-        print("🚀 PyThra Framework | Initialization Complete! Ready to build your amazing app! 🎯")
+        debug_print("🚀 PyThra Framework | Initialization Complete! Ready to build your amazing app! 🎯")
 
     # Package management methods are now handled by PackageManager
     # Legacy methods kept for backward compatibility if needed
@@ -288,6 +295,7 @@ class Framework:
         converts 3D models into pixels on your screen, but for web UI!
         """
         print("\n🎨 PyThra Framework | Performing Initial UI Render...")
+        debug_print("\n🎨 PyThra Framework | Performing Initial UI Render...")
 
         # 1. Build the full widget tree
         built_tree_root = self._build_widget_tree(root_widget)
@@ -400,15 +408,16 @@ class Framework:
 
         # 9. Start the application event loop.
         print("🎆 PyThra Framework | Starting application event loop...")
+        debug_print("🎆 PyThra Framework | Starting application event loop...")
         webwidget.start(window=self.window, debug=bool(self.config.get("Debug", False)))
 
     def close(self):
         # self.asset_server.stop()
-        self.window.close_window() if self.window else print("unable to close window: window is None")
+        self.window.close_window() if self.window else debug_print("unable to close window: window is None")
         self.asset_server.stop()
 
     def minimize(self):
-        self.window.minimize() if self.window else print("unable to close window: window is None")
+        self.window.minimize() if self.window else debug_print("unable to close window: window is None")
 
     def _dispose_widget_tree(self, widget: Optional[Widget]):
         """Recursively disposes of the state of a widget and its children."""
@@ -448,8 +457,16 @@ class Framework:
             'PythraGradientClipPath': "render/js/gradient_border.js",
             'PythraVirtualList': "render/js/virtual_list.js",
         }
-        
-        # If no specific engines requested, load all (fallback for compatibility)
+        # Build a cache key. None means 'ALL' engines load; use a stable frozenset.
+        cache_key = frozenset(required_engines) if required_engines is not None else frozenset({'__ALL__'})
+
+        # Return cached result if present
+        cached = self._js_utils_cache.get(cache_key)
+        if cached is not None:
+            debug_print(f"🔁 Reusing cached JS utilities for key={set(cache_key)}")
+            return cached
+
+        # Determine files to load
         if required_engines is None:
             print("🔧 Loading all JS engines (no optimization applied)")
             files_to_load = set(engine_to_file_map.values())
@@ -461,67 +478,84 @@ class Framework:
                     files_to_load.add(engine_to_file_map[engine])
                 else:
                     print(f"⚠️  Unknown engine requested: {engine}")
-        
+
         all_js_code = []
-        loaded_files = set()  # Track loaded files to avoid duplicates
-        
+        loaded_files = set()
+
         for file_path in files_to_load:
             if file_path in loaded_files:
-                continue  # Skip if already loaded
+                continue
             loaded_files.add(file_path)
-            
+
             try:
-                # Use Path for robust path handling
-                full_path = self.project_root / file_path
-                with full_path.open('r', encoding='utf-8') as f:
-                    content = f.read()
-                    # --- CLEANUP LOGIC ---
-                    content = content.replace('export class', 'class').replace('export function', 'function')
-                    content = re.sub(r'import\s+.*\s+from\s+.*?;?\n?', '', content)
-                    
-                    # Wrap in try-catch but assign classes to global scope
-                    wrapped_content = f"""try {{
-{content}
+                full_path = str(self.project_root / file_path)
 
-// Ensure classes are available globally
-if (typeof ResponsiveClipPath !== 'undefined') window.ResponsiveClipPath = ResponsiveClipPath;
-if (typeof PythraSlider !== 'undefined') window.PythraSlider = PythraSlider;
-if (typeof PythraDropdown !== 'undefined') window.PythraDropdown = PythraDropdown;
-if (typeof PythraGestureDetector !== 'undefined') window.PythraGestureDetector = PythraGestureDetector;
-if (typeof PythraGradientClipPath !== 'undefined') window.PythraGradientClipPath = PythraGradientClipPath;
-if (typeof PythraVirtualList !== 'undefined') window.PythraVirtualList = PythraVirtualList;
-if (typeof generateRoundedPath !== 'undefined') window.generateRoundedPath = generateRoundedPath;
-if (typeof scalePathAbsoluteMLA !== 'undefined') window.scalePathAbsoluteMLA = scalePathAbsoluteMLA;
-}} catch (e) {{
-    console.error('Error loading {os.path.basename(file_path)}:', e);
-}}"""
-                    
-                    all_js_code.append(f"// --- Injected from {os.path.basename(file_path)} ---\n{wrapped_content}")
-                    print(f"✅ Loaded JS engine: {os.path.basename(file_path)}")
-            except FileNotFoundError:
-                print(f"⚠️ Warning: JS utility file not found: {full_path}")
+                # Use cached file content when available
+                content = self._js_file_content_cache.get(full_path)
+                if content is None:
+                    try:
+                        with open(full_path, 'r', encoding='utf-8') as f:
+                            content = f.read()
+                        # Cache the raw content for future requests
+                        self._js_file_content_cache[full_path] = content
+                    except FileNotFoundError:
+                        print(f"⚠️ Warning: JS utility file not found: {full_path}")
+                        continue
 
-        # --- THIS IS THE NEW LOGIC ---
-        # 2. Load all DISCOVERED PLUGIN JS files
+                # Cleanup and wrap as before
+                cleaned = content.replace('export class', 'class').replace('export function', 'function')
+                cleaned = re.sub(r'import\s+.*\s+from\s+.*?;?\n?', '', cleaned)
+
+                wrapped_content = (
+                    f"try {{\n{cleaned}\n"
+                    "// Make common names available on window if defined\n"
+                    "if (typeof ResponsiveClipPath !== 'undefined') window.ResponsiveClipPath = ResponsiveClipPath;\n"
+                    "if (typeof PythraSlider !== 'undefined') window.PythraSlider = PythraSlider;\n"
+                    "if (typeof PythraDropdown !== 'undefined') window.PythraDropdown = PythraDropdown;\n"
+                    "if (typeof PythraGestureDetector !== 'undefined') window.PythraGestureDetector = PythraGestureDetector;\n"
+                    "if (typeof PythraGradientClipPath !== 'undefined') window.PythraGradientClipPath = PythraGradientClipPath;\n"
+                    "if (typeof PythraVirtualList !== 'undefined') window.PythraVirtualList = PythraVirtualList;\n"
+                    "if (typeof generateRoundedPath !== 'undefined') window.generateRoundedPath = generateRoundedPath;\n"
+                    "if (typeof scalePathAbsoluteMLA !== 'undefined') window.scalePathAbsoluteMLA = scalePathAbsoluteMLA;\n"
+                    "} catch (e) { console.error('Error loading %s:', e); }" % os.path.basename(file_path)
+                )
+
+                all_js_code.append(f"// --- Injected from {os.path.basename(file_path)} ---\n{wrapped_content}")
+                print(f"✅ Loaded JS engine: {os.path.basename(file_path)}")
+            except Exception as e:
+                print(f"⚠️ Error while loading JS utility '{file_path}': {e}")
+
+        # Load plugin JS modules (cache file contents similarly)
         for engine_name, module_info in self.plugin_js_modules.items():
             try:
-                full_path = Path(module_info['path'])
-                with full_path.open('r', encoding='utf-8') as f:
-                    content = f.read()
-                    content = re.sub(r'import\s+.*\s+from\s+.*?;?\n?', '', content)
-                    content = content.replace('export class', 'class').replace('export function', 'function')
-                    wrapped_content = f"""try {{
-{content}
-}} catch (e) {{
-    console.error('Error loading plugin {module_info['plugin']} - {os.path.basename(full_path)}:', e);
-}}"""
-                    all_js_code.append(f"// --- Injected Plugin '{module_info['plugin']}': {os.path.basename(full_path)} ---\n{wrapped_content}")
-                    print(f"✅ Loaded plugin JS: {module_info['plugin']} - {os.path.basename(full_path)}")
-            except FileNotFoundError:
-                print(f"⚠️ Warning: Plugin JS file not found: {full_path}")
-        # --- END OF NEW LOGIC ---
+                full_path = str(Path(module_info['path']))
+                content = self._js_file_content_cache.get(full_path)
+                if content is None:
+                    try:
+                        with open(full_path, 'r', encoding='utf-8') as f:
+                            content = f.read()
+                        self._js_file_content_cache[full_path] = content
+                    except FileNotFoundError:
+                        print(f"⚠️ Warning: Plugin JS file not found: {full_path}")
+                        continue
 
-        return "\n\n".join(all_js_code)
+                cleaned = re.sub(r'import\s+.*\s+from\s+.*?;?\n?', '', content)
+                cleaned = cleaned.replace('export class', 'class').replace('export function', 'function')
+                wrapped_content = f"try {{\n{cleaned}\n}} catch (e) {{ console.error('Error loading plugin {module_info['plugin']} - {os.path.basename(full_path)}:', e); }}"
+                all_js_code.append(f"// --- Injected Plugin '{module_info['plugin']}': {os.path.basename(full_path)} ---\n{wrapped_content}")
+                print(f"✅ Loaded plugin JS: {module_info['plugin']} - {os.path.basename(full_path)}")
+            except Exception as e:
+                print(f"⚠️ Error while loading plugin JS for {engine_name}: {e}")
+
+        combined = "\n\n".join(all_js_code)
+        # Cache the combined result for this set of engines
+        try:
+            self._js_utils_cache[cache_key] = combined
+        except Exception:
+            # If for some reason the key isn't hashable, skip caching silently
+            pass
+
+        return combined
 
     def _analyze_required_js_engines(self, widget_tree: Widget, result: 'ReconciliationResult') -> set:
         """
@@ -536,7 +570,7 @@ if (typeof scalePathAbsoluteMLA !== 'undefined') window.scalePathAbsoluteMLA = s
         # Check reconciliation result for JS initializers
         for init in result.js_initializers:
             init_type = init.get("type")
-            print('init_type: ', init_type)
+            debug_print('init_type: ', init_type)
             if init_type == "ResponsiveClipPath":
                 required_engines.update(['ResponsiveClipPath', 'generateRoundedPath', 'scalePathAbsoluteMLA'])
             elif init_type == "SimpleBar":
@@ -705,7 +739,7 @@ if (typeof scalePathAbsoluteMLA !== 'undefined') window.scalePathAbsoluteMLA = s
 
         if combined_script:
             print(f"🛠️  PyThra Framework | Applying {len(all_patches)} UI changes to app...")
-            print(f"📝 PyThra Framework | Patch Details: {[f'{p.action}({p.html_id[:8]}...)' for p in all_patches]}")
+            debug_print(f"📝 PyThra Framework | Patch Details: {[f'{p.action}({p.html_id[:8]}...)' for p in all_patches]}")
             self.window.evaluate_js(self.id, combined_script)
         else:
             print("✨ PyThra Framework | UI is up-to-date - No changes needed")
@@ -1041,7 +1075,6 @@ if (typeof scalePathAbsoluteMLA !== 'undefined') window.scalePathAbsoluteMLA = s
                 # --- ADD THIS BLOCK ---
                 # print("Props: ", props)
                 if props.get("init_dropdown"):
-                    print("---- dropdown init ----", target_id)
                     options_json = json.dumps(props.get("dropdown_options", {}))
                     command_js += f"""
                         setTimeout(() => {{

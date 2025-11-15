@@ -71,6 +71,7 @@ from collections import defaultdict
 from .widgets import Scrollbar
 from .state import StatefulWidget
 from .base import Widget, Key
+from .debug_utils import debug_print
 
 # It's good practice to import from your own project modules for type hints.
 from typing import TYPE_CHECKING
@@ -150,6 +151,7 @@ class Reconciler:
         self._registered_js_initializers: Dict[str, Dict[str, Dict[str, Any]]] = defaultdict(dict)
 
         print("🪄  PyThra Framework | Reconciler Initialized")
+        debug_print("🪄  PyThra Framework | Reconciler Initialized")
 
     def get_map_for_context(self, context_key: str) -> Dict[Union[Key, str], NodeData]:
         return self.context_maps.setdefault(context_key, {})
@@ -161,6 +163,7 @@ class Reconciler:
     def clear_all_contexts(self):
         """Resets all stored render maps."""
         print("Reconciler: Clearing all contexts.")
+        debug_print("Reconciler: Clearing all contexts.")
         self.context_maps.clear()
         self.context_maps['main'] = {}
 
@@ -177,27 +180,29 @@ class Reconciler:
         """
         result = ReconciliationResult()
 
-        # Auto-delegate to Rust adapter if available for better performance.
-        try:
-            from .rust_reconciler_adapter import RustReconcilerAdapter
-            adapter = RustReconcilerAdapter(self)
-            if adapter.is_available():
-                print("🪄  Rust adapter available.")
-                try:
-                    rs_result = adapter.reconcile(
-                        previous_map, new_widget_root, parent_html_id,
-                        old_root_key, is_partial_reconciliation
-                    )
-                    # Let the adapter produce a full ReconciliationResult
-                    print(f'Rust reconciler: {rs_result}')
+        # # Auto-delegate to Rust adapter if available for better performance.
+        # try:
+        #     from .rust_reconciler_adapter import RustReconcilerAdapter
+        #     adapter = RustReconcilerAdapter(self)
+        #     if adapter.is_available():
+        #         print("🪄  Rust adapter available.")
+        #         debug_print("🪄  Rust adapter available.")
+        #         try:
+        #             rs_result = adapter.reconcile(
+        #                 previous_map, new_widget_root, parent_html_id,
+        #                 old_root_key, is_partial_reconciliation
+        #             )
+        #             # Let the adapter produce a full ReconciliationResult
+        #             print(f'Rust reconciler: {rs_result}')
+        #             debug_print(f'Rust reconciler: {rs_result}')
 
-                    return rs_result
-                except Exception:
-                    pass
-                # pass
-        except Exception:
-            # Any import or adapter error should not prevent normal Python flow
-            pass
+        #             return rs_result
+        #         except Exception:
+        #             pass
+        #         # pass
+        # except Exception:
+        #     # Any import or adapter error should not prevent normal Python flow
+        #     pass
 
         if old_root_key is None:
             # Find the root key from the previous map if not provided.
@@ -236,8 +241,9 @@ class Reconciler:
             result.js_initializers.extend([dict(q) for q in queued])
             # clear the queue for that context after pushing to result
             self._external_js_init_queue["main"].clear()
-
-        print(f'Python reconciler: {result}')
+            debug_print(f'Injected {len(queued)} external JS initializers into reconciliation result.')
+        
+        debug_print(f'Python reconciler: {result}')
 
         return result
 
@@ -384,7 +390,7 @@ class Reconciler:
 
 
         if "init_dropdown" in new_props:
-            print("DROPDOWN INIT")
+            debug_print("DROPDOWN INIT")
             if html_id != new_id:
                 old_id, new_id = new_id, html_id
             initializer_data = {
@@ -397,6 +403,7 @@ class Reconciler:
 
         if "type" in new_props and "init_slider" in new_props:
             print("SLIDER INIT")
+            debug_print("SLIDER INIT")
             if html_id != new_id:
                 old_id, new_id = new_id, html_id
             initializer_data = {
@@ -409,6 +416,7 @@ class Reconciler:
 
         if "init_gesture_detector" in new_props:
             print("GESTURE-DETECTOR INIT")
+            debug_print("GESTURE-DETECTOR INIT")
             if html_id != new_id:
                 old_id, new_id = new_id, html_id
             initializer_data = {
@@ -421,6 +429,7 @@ class Reconciler:
 
         if "init_virtual_list" in new_props:
             print("VIRTUAL-LIST INIT: for ", html_id)
+            debug_print("VIRTUAL-LIST INIT: for ", html_id)
             if html_id != new_id:
                 old_id, new_id = new_id, html_id
             initializer_data = {
@@ -433,6 +442,7 @@ class Reconciler:
 
         if "init_gradient_clip_border" in new_props:
             print("GRADIENT-CLIP-BORDER INIT")
+            debug_print("GRADIENT-CLIP-BORDER INIT")
             if html_id != new_id:
                 old_id, new_id = new_id, html_id
             initializer_data = {
