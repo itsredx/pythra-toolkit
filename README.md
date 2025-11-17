@@ -3,7 +3,7 @@
 # PyThra GUI Toolkit
 
 <p align="center">
-  <img src="https://via.placeholder.com/150/6750A4/FFFFFF?text=PyThra" alt="PyThra Logo">
+  <img src="https://github.com/itsredx/pythra-toolkit/blob/main/assets/pythra.png?raw=true" alt="PyThra Logo">
 </p>
 
 <p align="center">
