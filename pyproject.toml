@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pythra"            # choose your real package name
-version = "0.1.9"
+version = "0.1.10"
 description = "PyThra — a Flutter-like GUI framework in Python. a declarative Python UI framework for desktop apps with a webview renderer."
 readme = "README.md"
 license = { text = "MIT" }
