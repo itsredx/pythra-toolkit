@@ -327,7 +327,11 @@ if __name__ == "__main__":
 
 ```
 
-## Demo
+## 🪄 Demo
+
+<p align="center">
+  <img src="https://github.com/itsredx/pythra-toolkit/blob/main/assets/demo.gif?raw=true" alt="PyThra App Demo" width="600">
+</p>
 
 ## 📜 Philosophy
 
