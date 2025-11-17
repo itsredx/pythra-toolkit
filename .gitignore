@@ -1,6 +1,7 @@
 # Ignore build artifacts and executables
 *.exe
 *.pkg
+*.token
 
 build/
 
