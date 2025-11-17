@@ -89,6 +89,9 @@ from contextlib import redirect_stdout, redirect_stderr  # Context managers for 
 
 import threading
 import wmi
+import platform
+
+from window_manager import SystemSleepManager 
 
 # =============================================================================
 # PYTHRA FRAMEWORK IMPORTS
@@ -97,8 +100,33 @@ import wmi
 # 🎯 Import PyThra's Event System
 # These classes define the data structures for touch and gesture events
 # that get passed between the JavaScript frontend and Python backend
-from ..events import TapDetails, PanUpdateDetails
-from ..debug_utils import debug_print
+try:
+    from ..events import TapDetails, PanUpdateDetails
+    from ..debug_utils import debug_print
+except Exception:
+    class TapDetails:
+        pass
+    class PanUpdateDetails:
+        def __init__(dx, dy):
+            self.dx = dx
+            self.dy = dy
+
+    def debug_print(*args, **kwargs):
+        """
+        Print debug output only if debug mode is enabled.
+        
+        This function behaves exactly like the built-in print() function,
+        but only prints if debug mode is enabled via set_debug(True).
+        
+        Args:
+            *args: Positional arguments to print (same as print())
+            **kwargs: Keyword arguments (same as print())
+        
+        Example:
+            debug_print("Value of x:", x)
+            debug_print("List:", items, sep=", ")
+        """
+        print(*args, **kwargs)
 
 QApplication.setAttribute(Qt.AA_EnableHighDpiScaling)
 QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps)
@@ -281,34 +309,63 @@ sys.stderr = FilteredOutput(sys.stderr)  # Filter error messages and warnings
 
 
 
-def watch_for_resume(on_resume_callback):
-    """Run in background thread and call callback on resume"""
+def watch_for_power_events(sleep_manager, on_resume_callback): # <-- No change to signature
+    """
+    Run in background thread, call sleep_manager methods on sleep/resume,
+    and call the original on_resume_callback for repaint logic.
+    """
     c = wmi.WMI()
     watcher = c.watch_for(
         notification_type="Creation",
         wmi_class="Win32_PowerManagementEvent"
     )
-    print("Watching for power management events...")
+    print("Watching for Windows power management events (sleep/resume)...")
     while True:
         event = watcher()
-        if event.EventType == 7:
+        # EventType 4 corresponds to the system entering a suspended state (sleep).
+        if event.EventType == 4:
+            print("System is entering sleep state.")
+            # =============================================================================
+            # FIXED: Instead of callLater, call the trigger method which emits a signal.
+            # This is thread-safe.
+            # =============================================================================
+            sleep_manager.trigger_sleep_event()
+
+        # EventType 7 corresponds to the system resuming from a suspended state.
+        elif event.EventType == 7:
             print("System has resumed from sleep.")
+            # =============================================================================
+            # FIXED: Use the trigger method here as well.
+            # =============================================================================
+            sleep_manager.trigger_resume_event()
+            
+            # The original on_resume_callback for repainting is still needed.
             on_resume_callback()
 
 
-def setup_resume_watcher(window):
-    """Start watching for resume and trigger window resize via a Qt signal (thread-safe)."""
-    def on_resume():
-        # This runs in background thread; emit the threaded signal to the GUI thread.
-        try:
-            print("watcher: emitting resume_signal")
-            window.resume_signal.emit()
-        except Exception as e:
-            print("watcher: failed to emit resume_signal:", e)
+def setup_platform_watchers(window, sleep_manager):
+    """
+    Starts the appropriate sleep/resume watchers for the current OS.
+    """
+    if platform.system() == "Windows":
+        def on_resume():
+            try:
+                print("watcher: emitting resume_signal for repaint.")
+                window.resume_signal.emit()
+            except Exception as e:
+                print("watcher: failed to emit resume_signal:", e)
 
-    # run watcher in background thread
-    thread = threading.Thread(target=watch_for_resume, args=(on_resume,), daemon=True)
-    thread.start()
+        # Run watcher in background thread, passing it the sleep manager
+        thread = threading.Thread(
+            target=watch_for_power_events,
+            args=(sleep_manager, on_resume),
+            daemon=True
+        )
+        thread.start()
+    
+    elif platform.system() == "Linux":
+        # On Linux, the manager handles its own listener
+        sleep_manager.setup_event_listener()
 
 
 
@@ -591,6 +648,12 @@ class WebWindow(QWidget):
         # Connect resume signal to slot that runs in the GUI thread
         self.resume_signal.connect(self._on_system_resume_slot)
 
+        self._base_dpi = None
+        self._base_device_pixel_ratio = None
+        self._zoom_override_enabled = True  # toggle if you prefer recreate-only behavior
+        self._dpi_probe_timeout_ms = 5000  # max time to try to probe DPR on startup
+
+        QTimer.singleShot(0, self._ensure_initial_dpi)
        
 
     def toggle_debug_window(self):
@@ -659,6 +722,9 @@ class WebWindow(QWidget):
             debug_print("GUI: handling system resume — syncing webview viewport now.")
             # call the sync helper which sets viewport and fires JS resize
             self._sync_webview_viewport()
+            # AFTER a small delay probe DPR and apply zoom if needed.
+            # This handles cases where QScreen reports 96 but page DPR changed.
+            QTimer.singleShot(100, self._on_dpi_changed)
             # optional: force a small delayed re-sync in case DPI changes arrive slightly later
             QTimer.singleShot(200, self._sync_webview_viewport)
         except Exception as e:
@@ -712,6 +778,254 @@ class WebWindow(QWidget):
             #print("Warning: failed to sync webview viewport:", e)
             debug_print("Warning: failed to sync webview viewport:", e)
 
+    def _ensure_initial_dpi(self):
+        """
+        Attempt to determine a correct base DPI/DPR.
+        Prefer the page's window.devicePixelRatio (most reliable for CSS scaling).
+        Fall back to QScreen.logicalDotsPerInch if JS probe fails.
+        """
+        # default safe values
+        fallback_dpi = 96.0
+        fallback_dpr = 1.0
+
+        # helper to finalize baseline using either values we obtained
+        def finalize(base_dpr, base_dpi=None):
+            try:
+                if base_dpr is None or base_dpr <= 0:
+                    base_dpr = fallback_dpr
+                if base_dpi is None:
+                    base_dpi = fallback_dpi * base_dpr
+                self._base_device_pixel_ratio = float(base_dpr)
+                self._base_dpi = float(base_dpi)
+                debug_print(f"Base DPI: {self._base_dpi}, base DPR: {self._base_device_pixel_ratio}")
+            except Exception as e:
+                debug_print("finalize base dpi failed:", e)
+                self._base_device_pixel_ratio = fallback_dpr
+                self._base_dpi = fallback_dpi
+
+        # 1) Try to capture DPR from the page (preferred)
+        def got_dpr(value):
+            """
+            Callback from runJavaScript. value is string from JS.
+            If we get it, compute base_dpi = 96 * dpr.
+            """
+            try:
+                if value is not None:
+                    dpr = float(value)
+                    if dpr > 0:
+                        finalize(dpr, 96.0 * dpr)
+                        return
+            except Exception:
+                pass
+
+            # If JS failed, try screen DPI fallback
+            try:
+                screen = QGuiApplication.primaryScreen()
+                if screen:
+                    logical = screen.logicalDotsPerInch() or fallback_dpi
+                    # some platforms return 96 as fallback even when scaled; attempt devicePixelRatio from screen
+                    try:
+                        scr_dpr = screen.devicePixelRatio() or 1.0
+                    except Exception:
+                        scr_dpr = 1.0
+                    finalize(scr_dpr, logical)
+                    return
+            except Exception:
+                pass
+
+            # final fallback
+            finalize(None, None)
+
+        # run the JS probe (async). If no webview/page, fallback to screen immediately
+        try:
+            if hasattr(self, "webview") and self.webview and self.webview.page():
+                # ask page for its devicePixelRatio; cast to string to avoid numeric conversions issues
+                self.webview.page().runJavaScript("window.devicePixelRatio.toString();", got_dpr)
+                # also set a timeout: if JS doesn't respond within timeout, use screen values
+                QTimer.singleShot(self._dpi_probe_timeout_ms, lambda: (
+                    finalize(self._base_device_pixel_ratio, self._base_dpi) if self._base_device_pixel_ratio is None else None
+                ))
+                return
+        except Exception as e:
+            debug_print("JS DPR probe failed to start:", e)
+
+        # fallback immediate attempt using screen
+        try:
+            screen = QGuiApplication.primaryScreen()
+            if screen:
+                logical = screen.logicalDotsPerInch() or fallback_dpi
+                try:
+                    scr_dpr = screen.devicePixelRatio() or 1.0
+                except Exception:
+                    scr_dpr = 1.0
+                finalize(scr_dpr, logical)
+                return
+        except Exception:
+            pass
+
+        # absolute fallback
+        finalize(None, None)
+
+
+    def _on_dpi_changed(self):
+        """
+        Called on screen DPI/geometry changes or system resume.
+        Probes the page DPR and applies the correct zoom factor relative to baseline DPR.
+        Falls back to QScreen.logicalDotsPerInch if JS probe fails.
+        Also updates the debug window if it is visible.
+        """
+        try:
+            if not hasattr(self, "webview") or not self.webview or not self.webview.page():
+                QTimer.singleShot(0, self._sync_webview_viewport)
+                return
+
+            def apply_scale_from_dpr(js_value):
+                try:
+                    new_dpr = float(js_value) if js_value is not None else None
+                except Exception:
+                    new_dpr = None
+
+                # compute scale
+                scale = 1.0
+                if new_dpr is not None:
+                    base_dpr = float(self._base_device_pixel_ratio or 1.0)
+                    if base_dpr <= 0:
+                        base_dpr = 1.0
+                    scale = new_dpr / base_dpr
+                else:
+                    try:
+                        screen = QGuiApplication.primaryScreen()
+                        if screen:
+                            logical_dpi = screen.logicalDotsPerInch() or 96.0
+                            base_dpi = float(self._base_dpi or 96.0)
+                            scale = logical_dpi / base_dpi
+                    except Exception:
+                        scale = 1.0
+
+                debug_print(f"Computed scale: {scale} (base_dpr={self._base_device_pixel_ratio})")
+
+                try:
+                    if self._zoom_override_enabled:
+                        # Apply absolute baseline DPR as zoom factor
+                        zoom_factor = float(self._base_device_pixel_ratio or 1.0)
+                        self.webview.page().setZoomFactor(zoom_factor)
+                        debug_print(f"Applied zoomFactor to main webview: {zoom_factor}")
+
+                        # Resize viewport
+                        QTimer.singleShot(50, self._sync_webview_viewport)
+                        
+                        # Also apply to debug window if visible
+                        if self.debug_window and self.debug_window.isVisible():
+                            try:
+                                self.debug_window.page().setZoomFactor(zoom_factor)
+                                self.debug_window.update()
+                                self.debug_window.page().runJavaScript('window.dispatchEvent(new Event("resize"));')
+                                debug_print(f"Applied zoomFactor to debug window: {zoom_factor}")
+                            except Exception as e:
+                                debug_print("Failed to apply zoom to debug window:", e)
+                        
+                        # Signal JS resize for main webview
+                        try:
+                            self.webview.page().runJavaScript('window.dispatchEvent(new Event("resize"));')
+                        except Exception as e:
+                            debug_print("Failed to dispatch resize JS after setZoomFactor:", e)
+                        return
+
+                    # For minor scale changes, just sync viewport
+                    if abs(scale - 1.0) < 0.03:
+                        QTimer.singleShot(0, self._sync_webview_viewport)
+                        if self.debug_window and self.debug_window.isVisible():
+                            QTimer.singleShot(0, lambda: self.debug_window.update())
+                        return
+
+                    # Fallback: sync viewport
+                    QTimer.singleShot(0, self._sync_webview_viewport)
+                    if self.debug_window and self.debug_window.isVisible():
+                        QTimer.singleShot(0, lambda: self.debug_window.update())
+
+                except Exception as e:
+                    debug_print("Error applying scale:", e)
+                    QTimer.singleShot(0, self._sync_webview_viewport)
+                    if self.debug_window and self.debug_window.isVisible():
+                        QTimer.singleShot(0, lambda: self.debug_window.update())
+
+            # Probe page DPR asynchronously
+            try:
+                self.webview.page().runJavaScript("window.devicePixelRatio.toString();", apply_scale_from_dpr)
+            except Exception as e:
+                debug_print("JS DPR probe failed in _on_dpi_changed:", e)
+                QTimer.singleShot(0, self._sync_webview_viewport)
+                if self.debug_window and self.debug_window.isVisible():
+                    QTimer.singleShot(0, lambda: self.debug_window.update())
+
+        except Exception as e:
+            debug_print("Error in _on_dpi_changed:", e)
+            QTimer.singleShot(0, self._sync_webview_viewport)
+            if self.debug_window and self.debug_window.isVisible():
+                QTimer.singleShot(0, lambda: self.debug_window.update())
+
+
+
+    def _apply_zoom_safely(self, target_zoom_candidate, desired_base_dpi, verify_timeout=250):
+        """
+        Try a candidate zoom factor first, then verify by probing window.devicePixelRatio.
+        If verification fails, return False so caller can try an alternative strategy.
+        """
+        try:
+            # guard values
+            if target_zoom_candidate <= 0 or target_zoom_candidate > 10:
+                debug_print("Refusing to apply out-of-range zoom:", target_zoom_candidate)
+                return False
+
+            debug_print(f"Attempting zoom candidate: {target_zoom_candidate}")
+            try:
+                self.webview.page().setZoomFactor(target_zoom_candidate)
+            except Exception as e:
+                debug_print("setZoomFactor call failed:", e)
+                return False
+
+            # short wait then probe DPR to verify
+            verified = {"ok": False}
+
+            def verify_cb(val):
+                try:
+                    if val is None:
+                        verified["ok"] = False
+                        return
+                    new_dpr_after = float(val)
+                    # Convert to DPI to compare with desired base DPI
+                    new_dpi_after = new_dpr_after * 96.0
+                    debug_print(f"Verification probe after zoom -> DPR: {new_dpr_after}, DPI: {new_dpi_after}")
+                    # Accept if within ~3% of desired DPI
+                    if abs(new_dpi_after - desired_base_dpi) / max(desired_base_dpi, 1.0) < 0.03:
+                        verified["ok"] = True
+                    else:
+                        verified["ok"] = False
+                except Exception as e:
+                    debug_print("Error in verify_cb:", e)
+                    verified["ok"] = False
+
+            # schedule a small delayed probe
+            QTimer.singleShot(verify_timeout, lambda: self.webview.page().runJavaScript("window.devicePixelRatio.toString();", verify_cb))
+            # busy-wait-ish polling (non-blocking) — poll a few times until verify_timeout*2
+            wait_attempts = 0
+            max_attempts = 6
+            poll_interval = max(50, verify_timeout // max_attempts)
+            while wait_attempts < max_attempts:
+                QTimer.singleShot(wait_attempts * poll_interval, lambda: None)
+                # We can't block the event loop; instead we rely on the verify callback to flip 'verified'
+                # So just sleep a small amount here to let the event loop run (very small)
+                import time
+                time.sleep(poll_interval / 1000.0)
+                if verified["ok"]:
+                    break
+                wait_attempts += 1
+
+            return bool(verified["ok"])
+        except Exception as e:
+            debug_print("Error in _apply_zoom_safely:", e)
+            return False
+
 
 # Create Window Function
 def create_window(
@@ -753,11 +1067,13 @@ def change_color():
 
 def start(window, debug):
 
+    sleep_manager = SystemSleepManager(window_manager)
+
     # Example to toggle debug window (could connect to a button or shortcut)
     if debug:
         window.toggle_debug_window()
 
-    setup_resume_watcher(window)
+    setup_platform_watchers(window, sleep_manager)
 
     sys.exit(app.exec())
 

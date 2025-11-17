@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pythra"            # choose your real package name
-version = "0.1.3"
+version = "0.1.6"
 description = "PyThra — a Flutter-like GUI framework in Python. a declarative Python UI framework for desktop apps with a webview renderer."
 readme = "README.md"
 license = { text = "MIT" }
@@ -33,3 +33,6 @@ classifiers = [
 
 [project.scripts]
 pythra = "pythra.pythra_cli.main:app"
+
+[tool.setuptools]
+include-package-data = true

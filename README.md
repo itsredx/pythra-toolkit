@@ -25,36 +25,34 @@
 
 ## 🚀 Key Features
 
-*   **Declarative UI:** Describe your UI as a function of your application's state. When the state changes, PyThra intelligently updates only the necessary parts of the UI.
-*   **Component-Based:** Build your application by composing small, reusable `Widget`s, just like in modern web frameworks.
-*   **Python-First:** Write your entire application logic, state management, and UI structure in pure Python. No need to write HTML, CSS, or JavaScript by hand.
-*   **Efficient Reconciliation:** Features a sophisticated reconciliation algorithm that minimizes DOM manipulations, ensuring a smooth and responsive user experience.
-*   **Rich Widget Library:** Includes a set of pre-built, Material Design-inspired widgets like `Scaffold`, `AppBar`, `TextField`, `ListView`, `Dialog`, and more.
-*   **Themed and Customizable:** Widgets are styled using a shared, dynamic CSS system. Easily create and apply themes, including custom scrollbars powered by SimpleBar.js.
-*   **Hot Reloading:** The architecture is designed to support hot reloading for a rapid development cycle.
+* **Declarative UI:** Describe your UI as a function of your application's state. When the state changes, PyThra intelligently updates only the necessary parts of the UI.
+* **Component-Based:** Build your application by composing small, reusable `Widget`s, just like in modern web frameworks.
+* **Python-First:** Write your entire application logic, state management, and UI structure in pure Python. No need to write HTML, CSS, or JavaScript by hand.
+* **Efficient Reconciliation:** Features a sophisticated reconciliation algorithm that minimizes DOM manipulations, ensuring a smooth and responsive user experience.
+* **Rich Widget Library:** Includes a set of pre-built, Material Design-inspired widgets like `Scaffold`, `AppBar`, `TextField`, `ListView`, `Dialog`, and more.
+* **Themed and Customizable:** Widgets are styled using a shared, dynamic CSS system. Easily create and apply themes, including custom scrollbars powered by SimpleBar.js.
+* **Hot Reloading:** The architecture is designed to support hot reloading for a rapid development cycle.
 
 ## 📦 Getting Started
 
 ### Prerequisites
 
-*   Python 3.8+
-*   PySide6 (`pip install pyside6`)
+* Python 3.8+
+* PySide6 (`pip install pyside6`)
 
 ### Installation
 
-Currently, PyThra is under active development. To use it, clone the repository and install the dependencies.
+Currently, PyThra is under active development. To use it, you can install it using pip or clone the repository and install the dependencies.
 
 ```bash
-# 1. Clone the repository
-git clone https://github.com/itsredx/pythra-0.0.1.git
-cd pythra
+# Install pythra and its prerequisites
+pip install pythra
 
-# 2. (Optional but recommended) Create and activate a virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows, use `venv\Scripts\activate`
+# Check pythra installation
+pythra doctor
 
-# 3. Install required packages
-pip install -r requirements.txt 
+# create a pythra project
+pyhtra create-project new-app
 ```
 
 ## 💡 Example Usage
@@ -62,7 +60,7 @@ pip install -r requirements.txt
 Building an application with PyThra is simple and intuitive. Here’s a classic "Counter App" example:
 
 ```python
-# main.py
+# lib/main.py
 # import colors
 from constants.colors import *
 
@@ -324,23 +322,24 @@ if __name__ == "__main__":
     app.set_root(Main(key=Key("home_page_wrapper")))
     app.run(title="My New Pythra App")
 
+
 ```
 
 ## 📜 Philosophy
 
 PyThra is built on the idea that building desktop UIs should be as fluid and logical as building for the modern web.
 
-*   **The UI is a reflection of the state.** You don't manually show, hide, or update UI elements. You change the state, and the toolkit figures out the most efficient way to reflect those changes in the UI.
-*   **Composition over inheritance.** Complex UIs are built by nesting simple widgets. A `Button` isn't a complex class; it's a `Container` with padding, a `Text` child, and an event listener.
-*   **Developer Experience is paramount.** Features like hot reloading, a declarative API, and a single language (Python) for everything are designed to make development faster and more enjoyable.
+* **The UI is a reflection of the state.** You don't manually show, hide, or update UI elements. You change the state, and the toolkit figures out the most efficient way to reflect those changes in the UI.
+* **Composition over inheritance.** Complex UIs are built by nesting simple widgets. A `Button` isn't a complex class; it's a `Container` with padding, a `Text` child, and an event listener.
+* **Developer Experience is paramount.** Features like hot reloading, a declarative API, and a single language (Python) for everything are designed to make development faster and more enjoyable.
 
 ## 🔬 Core Concepts
 
-*   **Widget:** The base class for everything you see on the screen. Widgets are lightweight, immutable "blueprints" for UI elements.
-*   **StatefulWidget & State:** For UI that needs to change dynamically, you use a `StatefulWidget`. Its mutable data is held in a separate `State` object. Calling `setState()` on this object is what triggers a UI rebuild.
-*   **`build()` method:** The core of every `State` object. It must return a `Widget` tree that describes the UI for the current state.
-*   **Reconciler:** The engine of the toolkit. It compares the widget tree returned by `build()` with the previous tree, generates a list of minimal changes (patches), and sends them to the web front-end to be applied to the DOM.
-*   **Key:** A special object that gives a widget a stable identity across rebuilds. This is crucial for preserving state in lists and for maintaining focus on elements like `TextField`.
+* **Widget:** The base class for everything you see on the screen. Widgets are lightweight, immutable "blueprints" for UI elements.
+* **StatefulWidget & State:** For UI that needs to change dynamically, you use a `StatefulWidget`. Its mutable data is held in a separate `State` object. Calling `setState()` on this object is what triggers a UI rebuild.
+* **`build()` method:** The core of every `State` object. It must return a `Widget` tree that describes the UI for the current state.
+* **Reconciler:** The engine of the toolkit. It compares the widget tree returned by `build()` with the previous tree, generates a list of minimal changes (patches), and sends them to the web front-end to be applied to the DOM.
+* **Key:** A special object that gives a widget a stable identity across rebuilds. This is crucial for preserving state in lists and for maintaining focus on elements like `TextField`.
 
 ## 🤝 Contributing
 
