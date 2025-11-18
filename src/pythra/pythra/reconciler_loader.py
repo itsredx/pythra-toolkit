@@ -8,11 +8,13 @@ and provides graceful fallback to pure Python if the extension is unavailable.
 # Try to import Cython-accelerated functions
 try:
     from . import reconciler_cython
+    print("[DEV] cython reconciler available")
     CYTHON_AVAILABLE = True
     cython_diff_props = reconciler_cython.cython_diff_props
     cython_diff_node_recursive = reconciler_cython.cython_diff_node_recursive
     cython_diff_children_recursive = reconciler_cython.cython_diff_children_recursive
 except ImportError:
+    print("[DEV] cython reconciler not found")
     CYTHON_AVAILABLE = False
     cython_diff_props = None
     cython_diff_node_recursive = None

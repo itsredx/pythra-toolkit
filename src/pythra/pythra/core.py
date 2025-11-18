@@ -5,6 +5,7 @@ import cProfile
 import pstats
 import io
 import logging
+import base64 
 # --- END OF IMPORTS ---
 
 import os
@@ -208,6 +209,7 @@ class Framework:
         self._initial_files_written: bool = False
         self._cached_initial_html: Optional[str] = None
         self._cached_initial_css: Optional[str] = None
+        self._cached_font_css: Optional[str] = None 
 
         # STEP 7: Start the asset server and finalize setup
         self.asset_server.start()  # Begin serving static files
@@ -1905,6 +1907,67 @@ class Framework:
         print(f"⚠️ No JS module found for engine: {engine_name}")
         return None
 
+    def _generate_embedded_font_css(self) -> str:
+        """
+        Reads TTF files from assets/fonts, converts to Base64, and returns CSS.
+        This eliminates FOUT (Flash of Unstyled Text) by embedding fonts directly.
+        """
+        if self._cached_font_css:
+            return self._cached_font_css
+
+        print("🔤 PyThra Framework | Embedding fonts into CSS for instant rendering...")
+        
+        # Map the Font Name to the Filename
+        fonts_to_load = [
+            ("Material Symbols Outlined", "MaterialSymbolsOutlined.ttf"),
+            ("Material Symbols Rounded", "MaterialSymbolsRounded.ttf"),
+            ("Material Symbols Sharp", "MaterialSymbolsSharp.ttf"),
+        ]
+
+        css_rules = []
+        fonts_dir = self.assets_dir / "fonts"
+
+        for font_family, filename in fonts_to_load:
+            file_path = fonts_dir / filename
+            
+            # 1. Try to load file and converting to Base64
+            if file_path.exists():
+                try:
+                    with open(file_path, "rb") as f:
+                        # Read binary, encode to b64 bytes, decode to utf-8 string
+                        b64_str = base64.b64encode(f.read()).decode("utf-8")
+                    
+                    rule = f"""
+                    @font-face {{
+                        font-family: '{font_family}';
+                        font-style: normal;
+                        font-weight: 100 700;
+                        font-display: block; /* Hides text until icon is ready */
+                        src: url(data:font/truetype;charset=utf-8;base64,{b64_str}) format('truetype');
+                    }}
+                    """
+                    css_rules.append(rule)
+                    # print(f"   ✅ Embedded {filename}")
+                except Exception as e:
+                    print(f"   ⚠️ Error embedding {filename}: {e}")
+                    # Fallback logic below will trigger
+            else:
+                # 2. Fallback: Use Localhost URL if file is missing
+                print(f"   ⚠️ Font file missing: {filename}. Falling back to network URL.")
+                port = self.config.get('assets_server_port')
+                rule = f"""
+                @font-face {{
+                   font-family: '{font_family}';
+                   font-style: normal;
+                   font-weight: 100 700;
+                   src: url(http://localhost:{port}/fonts/{filename}) format('truetype');
+                }}
+                """
+                css_rules.append(rule)
+
+        self._cached_font_css = "\n".join(css_rules)
+        return self._cached_font_css
+
     def _write_initial_files(
         self, title: str, html_content: str, initial_css_rules: str, initial_js: str
     ):
@@ -1920,29 +1983,30 @@ class Framework:
         
         plugin_css_str = "\n    ".join(plugin_css_links)
 
-        font_face_rules = f"""
-         /* Define the Material Symbols fonts hosted by our server */
-         @font-face {{
-           font-family: 'Material Symbols Outlined';
-           font-style: normal;
-           font-weight: 100 700; /* The range of weights the variable font supports */
-           src: url(http://localhost:{self.config.get('assets_server_port')}/fonts/MaterialSymbolsOutlined.ttf) format('truetype');
-         }}
+        font_face_rules = self._generate_embedded_font_css()
+        # f"""
+        #  /* Define the Material Symbols fonts hosted by our server */
+        #  @font-face {{
+        #    font-family: 'Material Symbols Outlined';
+        #    font-style: normal;
+        #    font-weight: 100 700; /* The range of weights the variable font supports */
+        #    src: url(http://localhost:{self.config.get('assets_server_port')}/fonts/MaterialSymbolsOutlined.ttf) format('truetype');
+        #  }}
 
-         @font-face {{
-           font-family: 'Material Symbols Rounded';
-           font-style: normal;
-           font-weight: 100 700;
-           src: url(http://localhost:{self.config.get('assets_server_port')}/fonts/MaterialSymbolsRounded.ttf) format('truetype');
-         }}
+        #  @font-face {{
+        #    font-family: 'Material Symbols Rounded';
+        #    font-style: normal;
+        #    font-weight: 100 700;
+        #    src: url(http://localhost:{self.config.get('assets_server_port')}/fonts/MaterialSymbolsRounded.ttf) format('truetype');
+        #  }}
 
-         @font-face {{
-           font-family: 'Material Symbols Sharp';
-           font-style: normal;
-           font-weight: 100 700;
-           src: url(http://localhost:{self.config.get('assets_server_port')}/fonts/MaterialSymbolsSharp.ttf) format('truetype');
-         }}
-         """
+        #  @font-face {{
+        #    font-family: 'Material Symbols Sharp';
+        #    font-style: normal;
+        #    font-weight: 100 700;
+        #    src: url(http://localhost:{self.config.get('assets_server_port')}/fonts/MaterialSymbolsSharp.ttf) format('truetype');
+        #  }}
+        #  """
         # --- END OF NEW FONT CSS ---
         base_css = """
          body { margin: 0; font-family: sans-serif; background-color: #f0f0f0; overflow: hidden;}

@@ -1,0 +1,55 @@
+name: Build Wheels
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  # Allow manually triggering the build from GitHub website
+  workflow_dispatch: 
+
+jobs:
+  build_wheels:
+    name: Build wheels on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        # This spins up 3 separate computers to build in parallel
+        os: [ubuntu-latest, windows-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Used to build the wheels
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v2.21.3
+        env:
+          # ONLY build for Python 3.9 through 3.13 (CPython)
+          # Skips PyPy and obsolete versions to save time
+          CIBW_BUILD: "cp39-* cp310-* cp311-* cp312-* cp313-*"
+          
+          # For Linux: auto-install dependencies if needed (optional)
+          # CIBW_BEFORE_ALL_LINUX: "yum install -y libffi-devel"
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v4
+        with:
+          name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
+          path: ./wheelhouse/*.whl
+
+upload_pypi:
+  needs: [build_wheels]
+  runs-on: ubuntu-latest
+  # Only publish when a release is created
+  if: github.event_name == 'release' && github.event.action == 'published'
+  steps:
+    - uses: actions/download-artifact@v4
+      with:
+        pattern: cibw-wheels-*
+        path: dist
+        merge-multiple: true
+
+    - uses: pypa/gh-action-pypi-publish@v1.10.3
+      with:
+        user: __token__
+        password: ${{ secrets.PYPI_API_TOKEN }}

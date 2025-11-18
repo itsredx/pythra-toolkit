@@ -4,6 +4,7 @@ MANIFEST.in
 PACKAGE_SYSTEM_README.md
 README.md
 pyproject.toml
+setup.py
 src/pythra/MANIFEST.in
 src/pythra/__init__.py
 src/pythra/config.yaml
@@ -67,6 +68,7 @@ src/pythra/pythra/core.py
 src/pythra/pythra/debug_utils.py
 src/pythra/pythra/drawing.py
 src/pythra/pythra/events.py
+src/pythra/pythra/font_encoder.py
 src/pythra/pythra/generate_icons.py
 src/pythra/pythra/id_manager.py
 src/pythra/pythra/navigation.py
@@ -77,6 +79,7 @@ src/pythra/pythra/package_system.py
 src/pythra/pythra/painting.py
 src/pythra/pythra/plugins.py
 src/pythra/pythra/reconciler.py
+src/pythra/pythra/reconciler_cython.pyx
 src/pythra/pythra/reconciler_loader.py
 src/pythra/pythra/rust_reconciler_adapter.py
 src/pythra/pythra/server.py
